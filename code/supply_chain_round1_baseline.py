@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 from statsmodels.tsa.arima.model import ARIMA
+import statsmodels.api as sm
 from scipy import linalg
 import datetime
 
@@ -65,12 +66,23 @@ class ReplenishUnit:
         # demand_average = np.mean(self.demand_hist["qty"].values[-3 * self.lead_time:])
         # return [demand_average] * 90
         # s2
+        # try:
+        #     series = pd.Series(np.array(self.demand_hist["qty"].values[- 3 * 7:]))
+        #     model = ARIMA(series, order=(7, 0, 0))
+        #     model_fit = model.fit()
+        #     output = model_fit.forecast(steps=14)
+        #     return output.values
+        # except:
+        #     demand_average = np.mean(self.demand_hist["qty"].values[-3 * self.lead_time:])
+        #     return [demand_average] * 90
+
+        # s3
         try:
             series = pd.Series(np.array(self.demand_hist["qty"].values[- 3 * 7:]))
-            model = ARIMA(series, order=(7, 0, 0))
-            model_fit = model.fit()
-            output = model_fit.forecast(steps=14)
-            return output.values
+            mod = sm.tsa.statespace.SARIMAX(series, order=(0, 0, 0), seasonal_order=(0, 1, 1, 7), enforce_stationarity=False,
+                                            enforce_invertibility=False)
+            results = mod.fit()
+            return results.get_forecast(steps=14).predicted_mean
         except:
             demand_average = np.mean(self.demand_hist["qty"].values[-3 * self.lead_time:])
             return [demand_average] * 90
@@ -90,22 +102,26 @@ class ReplenishUnit:
         else:
             #预测未来需求量
             qty_demand_forecast = self.forecast_function(demand_hist = self.demand_hist)
-
             #计算在途的补货量
             qty_intransit = sum(self.intransit) - self.arrival_sum
-
             #安全库存 用来抵御需求的波动性 选手可以换成自己的策略
-
             # 1. safety_stock = (max(self.demand_hist["qty"].values[-3 * self.lead_time:]) - (np.mean(self.demand_hist["qty"].values[- 3 * self.lead_time:]))) * self.lead_time
             # 2. safety_stock = (max(qty_demand_forecast) - (np.mean(qty_demand_forecast))) * self.lead_time
-            safety_stock = np.sum(max(qty_demand_forecast) - qty_demand_forecast)
-
+            safety_stock = np.sum(max(qty_demand_forecast) - qty_demand_forecast) # 目前最优表现
             #再补货点，用来判断是否需要补货 选手可以换成自己的策略
             reorder_point = sum(qty_demand_forecast[:self.lead_time]) + safety_stock
+
+            # # mean 方法的求值，然后将二者做一个平均
+            # qty_demand_forecast = [np.mean(self.demand_hist["qty"].values[-3 * self.lead_time:])] * self.lead_time
+            # safety_stock = (max(self.demand_hist["qty"].values[-3 * self.lead_time:]) - (np.mean(self.demand_hist["qty"].values[- 3 * self.lead_time:]))) * self.lead_time
+            # reorder_point2 = sum(qty_demand_forecast) + safety_stock
+            #
+            # reorder_point = (reorder_point2 + reorder_point) / 2.0
 
             #判断是否需要补货并计算补货量，选手可以换成自己的策略，可以参考赛题给的相关链接
             if self.qty_inventory_today + qty_intransit < reorder_point:
                 replenish = reorder_point - (self.qty_inventory_today + qty_intransit)
+
             self.qty_replenish.at[date] = replenish
             self.intransit.at[date + self.lead_time * date.freq] = replenish
 
